@@ -1,17 +1,21 @@
 import datetime
 import uuid
 
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template, session
 
+import celery_worker
 import database
+import models
 from models import Rating, Currency, TransactionHistory, User
 from celery_worker import task1
 
 app = Flask(__name__)
+app.secret_key = 'ghgfdghkljhgfdhk'
 
 
 
-@app.route('/', methods=['GET'])
+
+
 def index() -> str:
     """
      Start page display with instruction
@@ -39,40 +43,79 @@ def all_currency_rating():
     res = Currency.query.all()
     return [it.to_dict() for it in res]
 
+@app.get('/currency/trade/<currency_UPS1>/<currency_UPS2>')
+def init_transaction(currency_UPS1: str, currency_UPS2: str):
+    if session.get('user_id') is not None:
+        return"""
+                <form  method="post">
+
+  <div class="container">
+    <label for="uname"><b>amount_currency</b></label>
+    <input type="text" placeholder="Enter value" name="amount_currency" required>
+
+    <button type="submit">Login</button>
+   
+  </div>
+
+</form>
+</html>
+        """
+    else:
+        return 'ok'
+
 
 @app.post('/currency/trade/<currency_UPS1>/<currency_UPS2>')
 def currency_trade_post(currency_UPS1: str, currency_UPS2: str) -> dict:
-    req = request.json
-    user_id = req['data']['id_user']
-    amount = req['data']['amount']
+    user_id = session.get('user_login')
+    amount = float(request.form.get('amount_currency'))
+
+    # req = request.json
+    # user_id = req['data']['id_user']
+    # amount = req['data']['amount']
     queue_id = uuid.uuid4()
+    database.init_db()
     task_obj = task1.apply_async(args=[user_id, currency_UPS1, currency_UPS2, amount, queue_id])
     return {'task_id': str(task_obj)}
 
 
-
-
-
-
-
-
-@app.get('/user/<user_id>')
-def login_get(user_id):
+@app.route('/user', methods=['GET', 'POST'])
+def get_user_info() -> (list, str):
     database.init_db()
-    res = User.query.filter_by(login=user_id).first()
-    return res
+    if request.method == 'GET':
+        user_id = session.get('user_id')
+        if user_id is None:
+            return """
+            <html>
+            <form  method="post">
 
+  <div class="container">
+    <label for="uname"><b>Username</b></label>
+    <input type="text" placeholder="Enter Username" name="uname" required>
 
-@app.post('/currency/trade/<currency_UPS1>/<currency_UPS2>')
-def exchange(currency_UPS1, currency_UPS2):
-    database.init_db()
-    req = request.json
-    date_now = datetime.datetime.now().strftime("%d-%m-%Y")
-    amount = req['data']['amount']
-    user_id = 1
+    <label for="psw"><b>Password</b></label>
+    <input type="password" placeholder="Enter Password" name="psw" required>
 
-    celery_worker.task1.apply_async()
-    return req['status']
+    <button type="submit">Login</button>
+   
+  </div>
+
+</form>
+</html>
+            """
+        else:
+            user_info = User.query.filter_by(login=user_id).all()
+            if len(user_info) == 0:
+                return 'No user'
+            return [item.to_dict() for item in user_info]
+    if request.method == 'POST':
+        user_login = request.form.get('uname')
+        user_password = request.form.get('psw')
+        user_info_creds = models.User.query.filter_by(login=user_login, password=user_password).all()
+        if user_info_creds:
+            session['user_id'] = user_login
+            return 'Ok'
+        else:
+            return 'Error'
 
 
 @app.post('/currency/<name>/review')
@@ -99,16 +142,35 @@ def currency_review_gelete(name):
     return f'Review currency {name}, DELETE method'
 
 
-@app.post('/user/transfer')
-def transfer():
-    pass
-
-
 @app.get('/user/<user>/history')
 def user_history(user):
     database.init_db()
-    res = TransactionHistory.query.filter_by(user_id=user).all()
-    return [it.to_dict() for it in res]
+    user_id = session.get('user_id')
+    if user_id is None:
+        return """
+                <html>
+                <form  method="post">
+
+      <div class="container">
+        <label for="uname"><b>Username</b></label>
+        <input type="text" placeholder="Enter Username" name="uname" required>
+
+        <label for="psw"><b>Password</b></label>
+        <input type="password" placeholder="Enter Password" name="psw" required>
+
+        <button type="submit">Login</button>
+
+      </div>
+
+    </form>
+    </html>
+                """
+    else:
+        user_info = User.query.filter_by(login=user_id).all()
+        if len(user_info) == 0:
+            return 'No history'
+        res = TransactionHistory.query.filter_by(user_id=user_id).all()
+        return [it.to_dict() for it in res]
 
 
 
